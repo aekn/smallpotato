@@ -13,7 +13,6 @@ from tempfile import NamedTemporaryFile
 from typing import cast, final
 
 from reproductions.rtmdet import _prepare
-
 from smallpotato._download import sha256_file
 from smallpotato._process import capture_output
 from smallpotato.evaluation import COCOMetrics

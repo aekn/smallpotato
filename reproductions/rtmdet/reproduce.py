@@ -13,7 +13,6 @@ from time import perf_counter
 from typing import TextIO, cast, final
 
 from reproductions.rtmdet import _prepare, _record
-
 from smallpotato._console import Progress, format_duration, write_status
 from smallpotato._process import capture_output, run_logged
 from smallpotato.evaluation import COCOMetrics, eval_coco
