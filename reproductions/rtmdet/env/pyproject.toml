@@ -1,0 +1,37 @@
+[project]
+name = "rtmdet"
+version = "0.1.0"
+requires-python = "==3.10.22"
+dependencies = [
+    "matplotlib",
+    "mmcv",
+    "mmengine==0.10.4",
+    "numpy==1.26.4",
+    "packaging",
+    "pycocotools",
+    "scipy",
+    "setuptools==69.5.1",  # PyTorch 2.1.0 imports pkg_resources.packaging.
+    "shapely",
+    "six",
+    "terminaltables",
+    "torch==2.1.0",
+    "torchvision==0.16.0",
+    "tqdm",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+mmcv = { url = "https://download.openmmlab.com/mmcv/dist/cu121/torch2.1.0/mmcv-2.1.0-cp310-cp310-manylinux1_x86_64.whl" }
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv]
+package = false
+required-version = "==0.12.23"
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
