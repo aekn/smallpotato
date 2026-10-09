@@ -1,5 +1,3 @@
-__all__ = ()
-
 import os
 import signal
 import subprocess
@@ -19,10 +17,6 @@ def run_logged(
     env: Mapping[str, str] | None = None,
     on_line: Callable[[str], None] | None = None,
 ) -> None:
-    """Run *args* and write combined output to *log*."""
-    if not args:
-        raise ValueError("args must not be empty")
-
     with subprocess.Popen(
         args,
         cwd=cwd,
@@ -33,17 +27,16 @@ def run_logged(
         text=True,
         encoding="utf-8",
         errors="replace",
-        bufsize=1,
         start_new_session=os.name == "posix",
     ) as process:
         stream = process.stdout
-        if stream is None:
-            raise RuntimeError("stdout pipe is unavailable")
+        assert stream is not None
 
         try:
             for line in stream:
                 log.write(line)
                 log.flush()
+
                 if on_line is not None:
                     on_line(line.removesuffix("\n"))
 
@@ -52,43 +45,34 @@ def run_logged(
             _terminate(process)
             raise
 
-    if returncode:
+    if returncode != 0:
         raise subprocess.CalledProcessError(returncode, args)
 
 
-def capture_output(
+def run_captured(
     args: Sequence[str],
     /,
     *,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> str:
-    """Run *args* and return stripped stdout."""
-    if not args:
-        raise ValueError("args must not be empty")
-
-    result = subprocess.run(
-        args,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if result.returncode:
-        error = subprocess.CalledProcessError(
-            result.returncode,
+    try:
+        result = subprocess.run(
             args,
-            output=result.stdout,
-            stderr=result.stderr,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
         )
-        if stderr := result.stderr.strip():
-            error.add_note(stderr)
-        raise error
-    return result.stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        if exc.stderr and (stderr := exc.stderr.strip()):
+            exc.add_note(stderr)
+        raise
+
+    return result.stdout
 
 
 def _terminate(process: subprocess.Popen[str]) -> None:

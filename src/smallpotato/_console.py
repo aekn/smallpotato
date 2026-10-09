@@ -1,7 +1,5 @@
-__all__ = ()
-
 import sys
-from typing import Self, TextIO, final
+from typing import TextIO
 
 _LABEL_WIDTH = 12
 
@@ -15,16 +13,10 @@ def write_status(
 ) -> None:
     output = sys.stderr if stream is None else stream
     line = f"{label:<{_LABEL_WIDTH}}{text}".rstrip()
-    output.write(f"{line}\n")
-    output.flush()
+    print(line, file=output, flush=True)
 
 
-@final
 class Progress:
-    """Report bounded progress to a terminal or text stream."""
-
-    __slots__ = ("_label", "_live_width", "_stream", "_total", "_tty")
-
     def __init__(
         self,
         label: str,
@@ -39,14 +31,8 @@ class Progress:
         self._label = label
         self._total = total
         self._stream = sys.stderr if stream is None else stream
-        self._tty = self._stream.isatty()
+        self._is_tty = self._stream.isatty()
         self._live_width = 0
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
 
     def update(
         self,
@@ -55,54 +41,48 @@ class Progress:
         *,
         remaining: float | None = None,
     ) -> None:
-        if current < 0 or current > self._total:
+        if not 0 <= current <= self._total:
             raise ValueError(
                 f"current must be between 0 and {self._total}, got {current}"
             )
-        if remaining is not None and remaining < 0:
-            raise ValueError("remaining must not be negative")
 
         self._write(
-            _progress_line(
-                self._label,
-                current,
-                self._total,
-                remaining,
-            )
+            _format_progress(self._label, current, self._total, remaining)
         )
 
     def close(self) -> None:
-        if self._tty and self._live_width:
+        if self._is_tty and self._live_width:
             self._stream.write("\n")
             self._stream.flush()
             self._live_width = 0
 
     def _write(self, line: str) -> None:
-        if self._tty:
+        if self._is_tty:
             padding = " " * max(0, self._live_width - len(line))
             self._stream.write(f"\r{line}{padding}")
             self._live_width = len(line)
         else:
             self._stream.write(f"{line}\n")
+
         self._stream.flush()
 
 
-def _progress_line(
+def _format_progress(
     label: str,
     current: int,
     total: int,
     remaining: float | None,
 ) -> str:
     digits = len(str(total))
-    percent = 100.0 * current / total
     line = (
         f"{label:<{_LABEL_WIDTH}}"
-        f"{current:>{digits}}/{total:<{digits}}  "
-        f"{percent:5.1f}%"
+        f"{current:>{digits}}/{total}  "
+        f"{current / total:6.1%}"
     )
 
-    if current != total and remaining is not None:
-        return f"{line}   eta {format_duration(remaining)}"
+    if current < total and remaining is not None:
+        line += f"   eta {format_duration(remaining)}"
+
     return line
 
 

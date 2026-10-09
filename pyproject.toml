@@ -1,7 +1,7 @@
 [project]
 name = "smallpotato"
 version = "0.1.0"
-description = "Research on efficient streaming driving perception for constrained hardware."
+description = "Exploring driving perception on constrained hardware."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -79,7 +79,10 @@ docstring-code-line-length = "dynamic"
 
 [tool.pyright]
 include = ["src", "tests", "reproductions"]
-exclude = ["reproductions/**/smoke.py"]
+exclude = [
+    "reproductions/**/infer.py",
+    "reproductions/**/smoke.py",
+]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 venvPath = "."

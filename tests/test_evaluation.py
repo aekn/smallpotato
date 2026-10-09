@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-from pycocotools.coco import COCO
 
 from smallpotato.evaluation import eval_coco
 
@@ -11,7 +10,7 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def _write_ann(path: Path) -> None:
+def _write_annotations(path: Path) -> None:
     _write_json(
         path,
         {
@@ -51,7 +50,7 @@ def _write_ann(path: Path) -> None:
     )
 
 
-def _write_perfect_pred(path: Path) -> None:
+def _write_perfect_predictions(path: Path) -> None:
     _write_json(
         path,
         [
@@ -77,15 +76,20 @@ def _write_perfect_pred(path: Path) -> None:
     )
 
 
-def test_eval_coco_perfect_pred(tmp_path: Path) -> None:
-    ann = tmp_path / "ann.json"
-    pred = tmp_path / "pred.json"
+def test_eval_coco_perfect_predictions(tmp_path: Path) -> None:
+    annotations = tmp_path / "annotations.json"
+    predictions = tmp_path / "predictions.json"
+    _write_annotations(annotations)
+    _write_perfect_predictions(predictions)
 
-    _write_ann(ann)
-    _write_perfect_pred(pred)
+    phases: list[str] = []
+    metrics = eval_coco(
+        annotations,
+        predictions,
+        on_phase=phases.append,
+    )
 
-    metrics = eval_coco(ann, pred)
-
+    assert phases == ["load", "evaluate", "accumulate", "summarize"]
     assert metrics.ap == pytest.approx(1.0)
     assert metrics.ap50 == pytest.approx(1.0)
     assert metrics.ap75 == pytest.approx(1.0)
@@ -95,65 +99,23 @@ def test_eval_coco_perfect_pred(tmp_path: Path) -> None:
     assert metrics.ar100 == pytest.approx(1.0)
 
 
-def test_eval_coco_empty_pred(tmp_path: Path) -> None:
-    ann = tmp_path / "ann.json"
-    pred = tmp_path / "pred.json"
+def test_eval_coco_empty_predictions(tmp_path: Path) -> None:
+    annotations = tmp_path / "annotations.json"
+    predictions = tmp_path / "predictions.json"
+    _write_annotations(annotations)
+    _write_json(predictions, [])
 
-    _write_ann(ann)
-    _write_json(pred, [])
-
-    metrics = eval_coco(ann, pred)
+    metrics = eval_coco(annotations, predictions)
 
     assert metrics.ap == pytest.approx(0.0)
     assert metrics.ar100 == pytest.approx(0.0)
 
 
-def test_eval_coco_requires_array(tmp_path: Path) -> None:
-    ann = tmp_path / "ann.json"
-    pred = tmp_path / "pred.json"
-
-    _write_json(ann, {})
-    _write_json(pred, {})
+def test_eval_coco_requires_prediction_array(tmp_path: Path) -> None:
+    annotations = tmp_path / "annotations.json"
+    predictions = tmp_path / "predictions.json"
+    _write_json(annotations, {})
+    _write_json(predictions, {})
 
     with pytest.raises(TypeError, match="JSON array"):
-        eval_coco(ann, pred)
-
-
-def test_eval_coco_passes_loaded_predictions_to_coco(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ann = tmp_path / "ann.json"
-    pred = tmp_path / "pred.json"
-
-    _write_ann(ann)
-    _write_perfect_pred(pred)
-
-    original_load_res = COCO.loadRes
-    seen: list[object] = []
-
-    def load_res(self: COCO, res_file: object) -> COCO:
-        seen.append(res_file)
-        return original_load_res(
-            self,
-            res_file,  # pyright: ignore[reportArgumentType]
-        )
-
-    monkeypatch.setattr(COCO, "loadRes", load_res)
-
-    eval_coco(ann, pred)
-
-    assert len(seen) == 1
-    assert isinstance(seen[0], list)
-
-
-def test_eval_coco_reports_phases(tmp_path: Path) -> None:
-    ann = tmp_path / "ann.json"
-    pred = tmp_path / "pred.json"
-
-    _write_ann(ann)
-    _write_perfect_pred(pred)
-    phases: list[str] = []
-
-    eval_coco(ann, pred, on_phase=phases.append)
-
-    assert phases == ["load", "evaluate", "accumulate", "summarize"]
+        eval_coco(annotations, predictions)

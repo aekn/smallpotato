@@ -7,17 +7,13 @@ from contextlib import redirect_stdout
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import final
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
 
-@final
-@dataclass(frozen=True, slots=True, match_args=False)
+@dataclass(frozen=True, slots=True)
 class COCOMetrics:
-    """COCO bounding-box evaluation metrics."""
-
     ap: float
     ap50: float
     ap75: float
@@ -40,33 +36,41 @@ def eval_coco(
     on_phase: Callable[[str], None] | None = None,
 ) -> COCOMetrics:
     """Evaluate COCO bounding-box predictions."""
-
-    notify = on_phase or _ignore_phase
-    notify("load")
+    if on_phase is not None:
+        on_phase("load")
 
     with pred.open(encoding="utf-8") as file:
-        doc: object = json.load(file)
-
-    if not isinstance(doc, list):
+        predictions: object = json.load(file)
+    if not isinstance(predictions, list):
         raise TypeError("predictions must contain a JSON array")
 
     with redirect_stdout(io.StringIO()):
         gt = COCO(ann)
-        if doc:
-            dt = gt.loadRes(doc)  # pyright: ignore[reportArgumentType]
-        else:
-            dt = _empty_dt(gt)
-
+        dt = (
+            gt.loadRes(predictions)  # pyright: ignore[reportArgumentType]
+            if predictions
+            else _empty_dt(gt)
+        )
         evaluator = COCOeval(gt, dt, "bbox")
 
-        notify("evaluate")
+    if on_phase is not None:
+        on_phase("evaluate")
+    with redirect_stdout(io.StringIO()):
         evaluator.evaluate()
-        notify("accumulate")
+
+    if on_phase is not None:
+        on_phase("accumulate")
+    with redirect_stdout(io.StringIO()):
         evaluator.accumulate()
-        notify("summarize")
+
+    if on_phase is not None:
+        on_phase("summarize")
+    with redirect_stdout(io.StringIO()):
         evaluator.summarize()
 
     stats = evaluator.stats
+    if len(stats) != 12:
+        raise RuntimeError(f"expected 12 COCO bbox metrics, got {len(stats)}")
 
     return COCOMetrics(
         ap=float(stats[0]),
@@ -82,10 +86,6 @@ def eval_coco(
         ar_medium=float(stats[10]),
         ar_large=float(stats[11]),
     )
-
-
-def _ignore_phase(_phase: str, /) -> None:
-    pass
 
 
 def _empty_dt(gt: COCO, /) -> COCO:

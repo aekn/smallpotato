@@ -8,20 +8,20 @@ from smallpotato import _coco
 from smallpotato._download import Artifact, acquire_artifact
 from smallpotato._process import run_captured
 
-MMDET_REPOSITORY = "https://github.com/open-mmlab/mmdetection.git"
-MMDET_REVISION = "44ebd17b145c2372c4b700bfb9cb20dbd28ab64a"
-MMDET_CONFIG = Path("configs/rtmdet/rtmdet_tiny_8xb32-300e_coco.py")
+DFINE_REPOSITORY = "https://github.com/Peterande/D-FINE.git"
+DFINE_REVISION = "a15be7038b2149e787613505cda6199f366a7f59"
+DFINE_CONFIG = Path("configs/dfine/dfine_hgnetv2_n_coco.yml")
 
 CHECKPOINT = Artifact(
-    filename="rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth",
+    filename="dfine_n_coco.pth",
     urls=(
-        "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/"
-        "rtmdet_tiny_8xb32-300e_coco/"
-        "rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth",
+        "https://github.com/Peterande/storage/releases/download/"
+        "dfinev1.0/dfine_n_coco.pth",
     ),
     sha256=(
-        "78e30dcce0c6f594eaff0d6977b84b4103688b4aff0ad1aa16008a8cc854a7fb"
+        "41973938d2784d38a9836990d805b8392855ebf611aba55f0f7add90e110744c"
     ),
+    size=15_489_558,
 )
 
 
@@ -31,52 +31,24 @@ class PreparedInputs:
     config: Path
     checkpoint: Path
     coco: Path
+    images: Path
     annotations: Path
 
 
 def prepare_inputs(cache: Path, /) -> PreparedInputs:
     cache = cache.expanduser().resolve()
     source = _prepare_source(cache)
-    checkpoint = acquire_artifact(cache / "checkpoints" / "rtmdet", CHECKPOINT)
+    checkpoint = acquire_artifact(cache / "checkpoints" / "dfine", CHECKPOINT)
     coco = _coco.prepare_val2017(cache)
 
     return PreparedInputs(
         source=source,
-        config=source / MMDET_CONFIG,
+        config=source / DFINE_CONFIG,
         checkpoint=checkpoint,
         coco=coco.root,
+        images=coco.images,
         annotations=coco.annotations,
     )
-
-
-def write_runtime_config(
-    path: Path,
-    inputs: PreparedInputs,
-    /,
-    *,
-    prediction_prefix: Path,
-    num_workers: int = 2,
-) -> None:
-    if num_workers < 0:
-        raise ValueError("num_workers must not be negative")
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    text = (
-        f"_base_ = {_python_string(inputs.config)}\n\n"
-        "test_dataloader = dict(\n"
-        f"    num_workers={num_workers},\n"
-        f"    persistent_workers={num_workers > 0},\n"
-        "    dataset=dict(\n"
-        f"        data_root={_python_string(inputs.coco)},\n"
-        "    ),\n"
-        ")\n\n"
-        "test_evaluator = dict(\n"
-        f"    ann_file={_python_string(inputs.annotations)},\n"
-        "    format_only=True,\n"
-        f"    outfile_prefix={_python_string(prediction_prefix)},\n"
-        ")\n"
-    )
-    path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def verify_source(path: Path, /) -> None:
@@ -84,9 +56,9 @@ def verify_source(path: Path, /) -> None:
         raise RuntimeError(f"not a source directory: {path}")
 
     revision = _run_git(path, "rev-parse", "HEAD")
-    if revision != MMDET_REVISION:
+    if revision != DFINE_REVISION:
         raise RuntimeError(
-            f"MMDetection revision mismatch: expected {MMDET_REVISION}, "
+            f"D-FINE revision mismatch: expected {DFINE_REVISION}, "
             f"got {revision}"
         )
 
@@ -94,24 +66,24 @@ def verify_source(path: Path, /) -> None:
     if status:
         raise RuntimeError(f"source tree is not clean: {path}")
 
-    config = path / MMDET_CONFIG
+    config = path / DFINE_CONFIG
     if not config.is_file():
-        raise RuntimeError(f"missing RTMDet config: {config}")
+        raise RuntimeError(f"missing D-FINE-N config: {config}")
 
 
 def _prepare_source(cache: Path, /) -> Path:
-    parent = cache / "sources" / "mmdetection"
-    destination = parent / MMDET_REVISION
+    parent = cache / "sources" / "dfine"
+    destination = parent / DFINE_REVISION
 
     if destination.exists():
         verify_source(destination)
         return destination
 
     parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(dir=parent, prefix=".mmdetection.") as directory:
+    with TemporaryDirectory(dir=parent, prefix=".dfine.") as directory:
         checkout = Path(directory) / "checkout"
         _run_git(None, "init", "-q", str(checkout))
-        _run_git(checkout, "remote", "add", "origin", MMDET_REPOSITORY)
+        _run_git(checkout, "remote", "add", "origin", DFINE_REPOSITORY)
         _run_git(
             checkout,
             "fetch",
@@ -119,7 +91,7 @@ def _prepare_source(cache: Path, /) -> Path:
             "--depth=1",
             "--no-tags",
             "origin",
-            MMDET_REVISION,
+            DFINE_REVISION,
         )
         _run_git(checkout, "checkout", "-q", "--detach", "FETCH_HEAD")
         verify_source(checkout)
@@ -142,7 +114,3 @@ def _run_git(cwd: Path | None, command: str, *args: str) -> str:
         raise RuntimeError(
             f"git {command} failed with exit code {exc.returncode}"
         ) from exc
-
-
-def _python_string(path: Path, /) -> str:
-    return repr(str(path.resolve()))

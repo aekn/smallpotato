@@ -1,7 +1,7 @@
-__all__ = ()
-
 import hashlib
 from collections.abc import Sequence
+from dataclasses import dataclass
+from http.client import HTTPException
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.request import Request, urlopen
@@ -11,35 +11,50 @@ _TIMEOUT = 60.0
 _USER_AGENT = "smallpotato"
 
 
-def sha256_file(path: Path, /) -> str:
-    if not path.exists():
-        raise FileNotFoundError(path)
-    if not path.is_file():
-        raise RuntimeError(f"not a regular file: {path}")
+@dataclass(frozen=True, slots=True)
+class Artifact:
+    filename: str
+    urls: tuple[str, ...]
+    sha256: str
+    size: int | None = None
 
+
+def sha256_file(path: Path, /) -> str:
     with path.open("rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 def verify_file(
-    path: Path, /, *, sha256: str, size: int | None = None
+    path: Path,
+    /,
+    *,
+    sha256: str,
+    size: int | None = None,
 ) -> None:
-    if not path.exists():
-        raise FileNotFoundError(path)
-    if not path.is_file():
-        raise RuntimeError(f"not a regular file: {path}")
+    if size is not None:
+        actual_size = path.stat().st_size
+        if actual_size != size:
+            raise RuntimeError(
+                f"size mismatch for {path}: expected {size}, got {actual_size}"
+            )
 
-    actual_size = path.stat().st_size
-    if size is not None and actual_size != size:
+    actual_sha256 = sha256_file(path)
+    if actual_sha256 != sha256:
         raise RuntimeError(
-            f"size mismatch for {path}: expected {size}, got {actual_size}"
+            f"SHA-256 mismatch for {path}: expected {sha256}, "
+            f"got {actual_sha256}"
         )
 
-    digest = sha256_file(path)
-    if digest != sha256:
-        raise RuntimeError(
-            f"SHA-256 mismatch for {path}: expected {sha256}, got {digest}"
-        )
+
+def acquire_artifact(directory: Path, artifact: Artifact, /) -> Path:
+    path = directory / artifact.filename
+    acquire_file(
+        path,
+        urls=artifact.urls,
+        sha256=artifact.sha256,
+        size=artifact.size,
+    )
+    return path
 
 
 def acquire_file(
@@ -49,21 +64,15 @@ def acquire_file(
     urls: Sequence[str],
     sha256: str,
     size: int | None = None,
-) -> str | None:
-    """Ensure that *path* contains the expected file.
-
-    Return the source URL used to create the file, or None if the
-    existing file already matches.
-    """
+) -> None:
     if path.exists():
         verify_file(path, sha256=sha256, size=size)
-        return None
-
+        return
     if not urls:
         raise ValueError("urls must not be empty")
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    failures: list[tuple[str, Exception]] = []
+    failures: list[str] = []
 
     with TemporaryDirectory(
         dir=path.parent,
@@ -73,24 +82,16 @@ def acquire_file(
 
         for url in urls:
             try:
-                _download_file(
-                    url,
-                    temporary,
-                    sha256=sha256,
-                    size=size,
-                )
-            except (OSError, RuntimeError, ValueError) as exc:
-                failures.append((url, exc))
-                temporary.unlink(missing_ok=True)
+                _download_file(url, temporary, sha256=sha256, size=size)
+            except (OSError, HTTPException, RuntimeError, ValueError) as exc:
+                failures.append(f"{url}: {exc}")
                 continue
 
             temporary.replace(path)
-            return url
+            return
 
-    error = RuntimeError(f"failed to acquire {path}")
-    for url, exc in failures:
-        error.add_note(f"{url}: {type(exc).__name__}: {exc}")
-    raise error
+    detail = "; ".join(failures)
+    raise RuntimeError(f"failed to acquire {path}: {detail}")
 
 
 def _download_file(
@@ -107,7 +108,7 @@ def _download_file(
 
     with (
         urlopen(request, timeout=_TIMEOUT) as response,
-        path.open("xb") as file,
+        path.open("wb") as file,
     ):
         while chunk := response.read(_BLOCK_SIZE):
             file.write(chunk)

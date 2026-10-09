@@ -1,0 +1,39 @@
+{
+  "metrics": {
+    "ap": 0.4279972400671271,
+    "ap50": 0.6028099059884774,
+    "ap75": 0.4545386692428566,
+    "ap_small": 0.22882582627319026,
+    "ap_medium": 0.4678795208625124,
+    "ap_large": 0.6215192886300667,
+    "ar1": 0.34256664197573444,
+    "ar10": 0.5711430940727233,
+    "ar100": 0.634649524097191,
+    "ar_small": 0.3979374302915091,
+    "ar_medium": 0.6975149377867146,
+    "ar_large": 0.8567128147266587
+  },
+  "reference": {
+    "basis": "independent pycocotools evaluation of the validated T4 qualification run",
+    "device": "Tesla T4",
+    "prediction_sha256": "ab53c27e191d788533d2250a205f69bdce9b3d216add073431f820752569ab25",
+    "upstream_revision": "a15be7038b2149e787613505cda6199f366a7f59"
+  },
+  "reported": {
+    "precision_decimals": 3,
+    "metrics": {
+      "ap": 0.428,
+      "ap50": 0.603,
+      "ap75": 0.455,
+      "ap_small": 0.229,
+      "ap_medium": 0.468,
+      "ap_large": 0.621,
+      "ar1": 0.342,
+      "ar10": 0.571,
+      "ar100": 0.635,
+      "ar_small": 0.398,
+      "ar_medium": 0.698,
+      "ar_large": 0.856
+    }
+  }
+}

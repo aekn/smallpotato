@@ -4,7 +4,7 @@ from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
 
-from reproductions.rtmdet import _prepare
+from reproductions.dfine import _prepare
 
 from smallpotato import _coco
 from smallpotato._download import sha256_file
@@ -26,8 +26,8 @@ def build_provenance(
     started_at: datetime,
     environment: Mapping[str, str],
     command: Sequence[str],
+    batch_size: int,
     num_workers: int,
-    runtime: Path,
 ) -> dict[str, object]:
     commit, dirty = git_state(root)
     return {
@@ -39,9 +39,9 @@ def build_provenance(
             "pycocotools": version("pycocotools"),
         },
         "upstream": {
-            "repository": _prepare.MMDET_REPOSITORY,
-            "revision": _prepare.MMDET_REVISION,
-            "config": str(_prepare.MMDET_CONFIG),
+            "repository": _prepare.DFINE_REPOSITORY,
+            "revision": _prepare.DFINE_REVISION,
+            "config": str(_prepare.DFINE_CONFIG),
         },
         "environment": {
             **dict(environment),
@@ -62,11 +62,11 @@ def build_provenance(
             },
         },
         "runtime": {
+            "batch_size": batch_size,
             "num_workers": num_workers,
-            "runtime_config": {
-                "path": runtime.name,
-                "sha256": sha256_file(runtime),
-            },
+            "reference_world_size": 4,
+            "reference_total_batch_size": 256,
+            "reference_local_batch_size": 64,
             "reference_sha256": sha256_file(reference),
             "command": list(command),
         },

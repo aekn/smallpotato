@@ -1,0 +1,22 @@
+{
+  "metrics": {
+    "ap": 0.4112043795,
+    "ap50": 0.5786713137,
+    "ap75": 0.4472345235,
+    "ap_small": 0.2098976020,
+    "ap_medium": 0.4550520685,
+    "ap_large": 0.5830372447,
+    "ar1": 0.3339977181,
+    "ar10": 0.5535840903,
+    "ar100": 0.6052522449,
+    "ar_small": 0.3807238592,
+    "ar_medium": 0.6768884067,
+    "ar_large": 0.7969027031
+  },
+  "reference": {
+    "basis": "independent pycocotools evaluation of the validated T4 run",
+    "device": "Tesla T4",
+    "prediction_sha256": "1dc864d877662a6544f6fe218862a59e3f7142a0c3c17464dde9910e1372ae83",
+    "upstream_revision": "44ebd17b145c2372c4b700bfb9cb20dbd28ab64a"
+  }
+}

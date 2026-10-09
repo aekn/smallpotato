@@ -10,7 +10,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import TextIO, cast
 
-from reproductions.rtmdet import _prepare, _record
+from reproductions.dfine import _prepare, _record
 
 from smallpotato._console import Progress, format_duration, write_status
 from smallpotato._process import run_captured, run_logged
@@ -26,12 +26,13 @@ _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parents[1]
 _ENV = _HERE / "env"
 _PYTHON = _ENV / ".venv" / "bin" / "python"
+_INFER = _HERE / "infer.py"
 _REFERENCE = _HERE / "reference.json"
 _SMOKE = _HERE / "smoke.py"
 
-_SMOKE_LABEL_WIDTH = 13
+_SMOKE_LABEL_WIDTH = 14
 _TEST_PROGRESS = re.compile(
-    r"\bEpoch\(test\)\s+\[\s*(\d+)/(\d+)\]"
+    r"\bTest:\s+\[\s*(\d+)/(\d+)\]"
     r"(?:\s+eta:\s*(\d+):(\d+):(\d+))?"
 )
 _WARNING = re.compile(r"\bWARNING\b|\b[A-Za-z]*Warning:")
@@ -41,13 +42,10 @@ _SMOKE_KEYS = (
     ("torch", "torch"),
     ("torch cuda", "torch_cuda"),
     ("torchvision", "torchvision"),
-    ("mmcv", "mmcv"),
-    ("mmengine", "mmengine"),
-    ("mmdet", "mmdet"),
-    ("setuptools", "setuptools"),
     ("device", "device"),
-    ("mmdet env", "mmdet_env"),
-    ("mmcv ops", "mmcv_ops"),
+    ("state tensors", "state_tensors"),
+    ("checkpoint", "checkpoint"),
+    ("dfine model", "dfine_model"),
 )
 
 
@@ -60,7 +58,7 @@ class _UpstreamOutput:
     def consume(self, line: str, /) -> None:
         match = _TEST_PROGRESS.search(line)
         if match is not None:
-            current = int(match.group(1))
+            current = int(match.group(1)) + 1
             total = int(match.group(2))
             if current > self._last_progress:
                 if self._progress is None:
@@ -100,14 +98,27 @@ class _SmokeCapture:
 
 
 def main(argv: list[str] | None = None) -> int:
-    cache, runs, num_workers = _parse_args(argv)
+    cache, runs, batch_size, num_workers = _parse_args(argv)
     try:
-        return reproduce(cache=cache, runs=runs, num_workers=num_workers)
+        return reproduce(
+            cache=cache,
+            runs=runs,
+            batch_size=batch_size,
+            num_workers=num_workers,
+        )
     except KeyboardInterrupt:
         return 130
 
 
-def reproduce(*, cache: Path, runs: Path, num_workers: int) -> int:
+def reproduce(
+    *,
+    cache: Path,
+    runs: Path,
+    batch_size: int,
+    num_workers: int,
+) -> int:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
     if num_workers < 0:
         raise ValueError("num_workers must not be negative")
 
@@ -117,9 +128,7 @@ def reproduce(*, cache: Path, runs: Path, num_workers: int) -> int:
     log_path = run / "run.log"
     summary_path = run / "summary.json"
     provenance_path = run / "provenance.json"
-    runtime_path = run / "runtime.py"
     prediction_path = run / "pred.bbox.json"
-    upstream = run / "upstream"
     durations: dict[str, float] = {}
 
     _write_header(run)
@@ -143,20 +152,18 @@ def reproduce(*, cache: Path, runs: Path, num_workers: int) -> int:
             reference = load_reference(_REFERENCE)
 
             phase = perf_counter()
-            environment = _prepare_environment(log, inputs.source)
+            environment = _prepare_environment(log, inputs)
             durations["environment"] = perf_counter() - phase
             write_status("device", environment["device"])
             _write_check("environment")
             _prepare.verify_source(inputs.source)
 
-            _prepare.write_runtime_config(
-                runtime_path,
+            command = _infer_command(
                 inputs,
-                prediction_prefix=run / "pred",
+                prediction_path,
+                batch_size=batch_size,
                 num_workers=num_workers,
             )
-            upstream.mkdir()
-            command = _test_command(inputs, runtime_path, upstream)
             write_json(
                 provenance_path,
                 _record.build_provenance(
@@ -166,8 +173,8 @@ def reproduce(*, cache: Path, runs: Path, num_workers: int) -> int:
                     started_at=started_at,
                     environment=environment,
                     command=command,
+                    batch_size=batch_size,
                     num_workers=num_workers,
-                    runtime=runtime_path,
                 ),
             )
             _log(log, f"command {shlex.join(command)}")
@@ -179,7 +186,7 @@ def reproduce(*, cache: Path, runs: Path, num_workers: int) -> int:
                     command,
                     log=log,
                     cwd=inputs.source,
-                    env=_test_environment(inputs.source),
+                    env=_upstream_environment(inputs.source),
                     on_line=output.consume,
                 )
             finally:
@@ -195,8 +202,7 @@ def reproduce(*, cache: Path, runs: Path, num_workers: int) -> int:
                 )
             if not prediction_path.is_file():
                 raise RuntimeError(
-                    "MMDetection did not create predictions: "
-                    f"{prediction_path}"
+                    f"D-FINE did not create predictions: {prediction_path}"
                 )
 
             phase = perf_counter()
@@ -237,9 +243,9 @@ def reproduce(*, cache: Path, runs: Path, num_workers: int) -> int:
             raise
 
 
-def _parse_args(argv: list[str] | None) -> tuple[Path, Path, int]:
+def _parse_args(argv: list[str] | None) -> tuple[Path, Path, int, int]:
     parser = argparse.ArgumentParser(
-        description="Reproduce RTMDet-tiny on COCO val2017."
+        description="Reproduce D-FINE-N on COCO val2017."
     )
     parser.add_argument(
         "--cache-dir",
@@ -250,19 +256,26 @@ def _parse_args(argv: list[str] | None) -> tuple[Path, Path, int]:
     parser.add_argument(
         "--runs-dir",
         type=Path,
-        default=_ROOT / "runs" / "rtmdet",
+        default=_ROOT / "runs" / "dfine",
         help="directory in which run directories are created",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="single-GPU validation batch size (default: 64)",
     )
     parser.add_argument(
         "--num-workers",
         type=int,
-        default=2,
-        help="MMDetection test DataLoader workers (default: 2)",
+        default=4,
+        help="D-FINE validation DataLoader workers (default: 4)",
     )
     args = parser.parse_args(argv)
     return (
         cast(Path, args.cache_dir),
         cast(Path, args.runs_dir),
+        cast(int, args.batch_size),
         cast(int, args.num_workers),
     )
 
@@ -293,7 +306,10 @@ def _new_run_dir(root: Path, now: datetime, /) -> Path:
         return path
 
 
-def _prepare_environment(log: TextIO, source: Path) -> dict[str, str]:
+def _prepare_environment(
+    log: TextIO,
+    inputs: _prepare.PreparedInputs,
+) -> dict[str, str]:
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is not installed")
@@ -314,12 +330,16 @@ def _prepare_environment(log: TextIO, source: Path) -> dict[str, str]:
     )
 
     capture = _SmokeCapture()
-    smoke_env = _test_environment(source)
     run_logged(
-        (str(_PYTHON), str(_SMOKE)),
+        (
+            str(_PYTHON),
+            str(_SMOKE),
+            str(inputs.config),
+            str(inputs.checkpoint),
+        ),
         log=log,
-        cwd=_ROOT,
-        env=smoke_env,
+        cwd=inputs.source,
+        env=_upstream_environment(inputs.source),
         on_line=capture.consume,
     )
 
@@ -339,28 +359,37 @@ def _prepare_environment(log: TextIO, source: Path) -> dict[str, str]:
     return values
 
 
-def _test_command(
+def _infer_command(
     inputs: _prepare.PreparedInputs,
-    runtime: Path,
-    upstream: Path,
+    output: Path,
     /,
+    *,
+    batch_size: int,
+    num_workers: int,
 ) -> tuple[str, ...]:
     return (
         str(_PYTHON),
-        str(inputs.source / "tools" / "test.py"),
-        str(runtime),
+        str(_INFER),
+        "--config",
+        str(inputs.config),
+        "--checkpoint",
         str(inputs.checkpoint),
-        "--work-dir",
-        str(upstream),
-        "--launcher",
-        "none",
+        "--images",
+        str(inputs.images),
+        "--annotations",
+        str(inputs.annotations),
+        "--output",
+        str(output),
+        "--batch-size",
+        str(batch_size),
+        "--num-workers",
+        str(num_workers),
     )
 
 
-def _test_environment(source: Path, /) -> dict[str, str]:
+def _upstream_environment(source: Path, /) -> dict[str, str]:
     env = _nested_environment()
     env["PYTHONPATH"] = str(source)
-    env["MPLBACKEND"] = "Agg"
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
@@ -394,9 +423,9 @@ def _coco_phase(phase: str, /) -> None:
 
 
 def _write_header(run: Path, /) -> None:
-    print("smallpotato - reproduce rtmdet", file=sys.stderr)
+    print("smallpotato - reproduce dfine", file=sys.stderr)
     print(file=sys.stderr)
-    write_status("model", "rtmdet-tiny")
+    write_status("model", "dfine-n")
     write_status("dataset", "coco/val2017")
     write_status("run", str(run))
     print(file=sys.stderr)

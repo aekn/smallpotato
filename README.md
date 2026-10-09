@@ -1,7 +1,6 @@
 # Small Potato
 
-Research on high-quality streaming monocular driving perception under severe
-edge-compute constraints.
+Exploring driving perception on constrained hardware.
 
 ## Development
 
